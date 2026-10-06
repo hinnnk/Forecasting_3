@@ -1,0 +1,83 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+Train/Test
+
+from matplotlib import axes
+train = df.loc[df.index < '05-01-2017']
+test = df.loc[df.index >= '05-01-2017']
+fig, axes = plt.subplots(figsize=(15,5))
+train['Global_active_power'].plot(ax=axes, label="Training Set")
+test['Global_active_power'].plot(ax=axes, label="Test Set")
+axes.legend(['Training Set', 'Test Set'])
+plt.show()
+
+Feature Creation
+
+def create_features(df):
+    """
+    Create time series features based on time series index
+    """
+    df = df.copy()
+    df['hour'] = df.index.hour
+    df['dayofweek'] = df.index.dayofweek
+    df['quarter'] = df.index.quarter
+    df['date'] = df.index.date
+    df['day'] = df.index.day
+    df['month'] = df.index.month
+    df['year'] = df.index.year
+    df['dayofyear'] = df.index.dayofyear
+    return df
+df = create_features(df)
+
+Visualise Features/ Target Relationships
+
+sns.pairplot(df[['Global_active_power', 'Voltage', 'Global_intensity', 'hour']], kind='scatter', plot_kws={'alpha': 0.4})
+
+sns.lmplot(x='Global_intensity', y='Global_active_power', data=df, scatter_kws={'alpha': 0.3})
+
+Training Model 
+
+train = create_features(train)
+test = create_features(test)
+FEATURES = ['hour', 'dayofweek', 'quarter', 'day', 'month', 'year', 'dayofyear']
+TARGET = 'Global_active_power'
+
+X_train = train[FEATURES]
+y_train = train[TARGET]
+X_test = test[FEATURES]
+y_test = test[TARGET]
+
+lin_reg = LinearRegression()
+lin_reg.fit(X_train, y_train)
+cdf = pd.DataFrame(lin_reg.coef_, X_train.columns, columns=['Coefficient'])
+print(cdf)
+
+Predictions 
+
+y_pred = lin_reg.predict(X_test)
+print("R-squared:", r2_score(y_test, y_pred))
+print("RMSE:", np.sqrt(mean_squared_error(y_test, y_pred)))
+test['prediction_linreg'] = y_pred
+
+df = df.drop(columns=[c for c in df.columns if 'prediction' in c], errors='ignore')
+test['prediction'] = lin_reg.predict(X_test)
+df = df.merge(test[['prediction']], how='left', left_index=True, right_index=True)
+ax = df[['Global_active_power']].plot(figsize=(15,5))
+df['prediction'].plot(ax=ax, style='.')
+ax.set_title('Raw Data & Linear Regression Predictions')
+plt.show()
+
+ax=df.loc[(df.index > '2017-05-01') & (df.index < '2017-05-7'), ['Global_active_power', 'prediction']].plot(figsize=(15,5), title='Predictions vs Actual')
+plt.show()
+
+Calculate Error
+
+test['error'] = np.abs(test[TARGET] - test['prediction_linreg'])
+test['date'] = test.index.date
+test.groupby('date')['error'].mean().sort_values(ascending=False).head(10)
