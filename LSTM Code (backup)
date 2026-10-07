@@ -131,7 +131,7 @@ aligned_true_power = test_data['Global_active_power'].iloc[-n_preds:].to_list()
 fig, ax1 = plt.subplots(figsize=(14, 6))
 
 ax1.plot(aligned_dates, aligned_true_power, color='red', label='Original (Global Active Power)', linewidth=1.5)
-ax1.plot(aligned_dates, unscaled_predictions, color='blue', label='Predicted', linestyle='--', linewidth=1.5)
+ax1.plot(aligned_dates, unscaled_predictions, color='blue', label='Predicted', linewidth=1.5)
 
 fig.autofmt_xdate()
 plt.xlabel('Date & Time')
