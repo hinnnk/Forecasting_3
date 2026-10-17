@@ -165,9 +165,8 @@ plt.show()  #shows the first graph
 
 
 
-fig, ax1 = plt.subplots(figsize=(14, 6))
-
 #Scatterplot
+fig, ax1 = plt.subplots(figsize=(14, 6))
 ax1.scatter(aligned_dates, aligned_true_power, color='red', label='Actual Global Active Power', s=10, alpha=0.5)
 ax1.scatter(aligned_dates, unscaled_predictions, color='blue', label='Predicted Global Active Power', s=10, alpha=0.5)
 
