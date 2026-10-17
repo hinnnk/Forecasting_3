@@ -1,0 +1,337 @@
+import pandas as pd
+import numpy as np
+import tensorflow as tf
+import matplotlib.pyplot as plt
+
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+---
+url = "https://raw.githubusercontent.com/hinnnk/Forecasting_3/refs/heads/main/Dataset2_CLEANED_household_power_consumption_hourly.csv"
+df = pd.read_csv(url)
+
+#converting datetime to datetime format and then sorting the data by time
+df['datetime'] = pd.to_datetime(df['datetime'])
+df = df.sort_values('datetime').reset_index(drop=True)
+
+print("Dataset 2 shape:", df.shape)
+
+df.head()
+
+---
+
+#selecting the input features
+features = [
+    'Global_active_power',
+    'Global_reactive_power',
+    'Voltage',
+    'Global_intensity',
+    'Sub_metering_1',
+    'Sub_metering_2',
+    'Sub_metering_3'
+]
+
+#creating the input data
+data = df[features]
+
+print("Number of features:", len(features))
+print("Data shape:", data.shape)
+
+---
+
+#NEW Load Dataset 1 for testing
+
+url1 = "https://raw.githubusercontent.com/hinnnk/Forecasting_3/refs/heads/main/Dataset1_CLEANED_household_power_consumption_hourly.csv"
+
+df1 = pd.read_csv(url1)
+
+df1['datetime'] = pd.to_datetime(df1['datetime'])
+df1 = df1.sort_values('datetime').reset_index(drop=True)
+
+#select the same features used for training
+test_data = df1[features]
+
+print("Dataset 1 shape:", df1.shape)
+print("Testing data shape:", test_data.shape)
+
+df1.head()
+
+---
+
+#scale the data using dataset 2
+scaler = MinMaxScaler()
+
+train_scaled = scaler.fit_transform(data)
+test_scaled = scaler. transform(test_data)
+
+print("Trainging data scaled:", train_scaled.shape)
+print("Testing data scaled:", test_scaled.shape)
+
+---
+
+#create sequences using the previous 24 hours
+window_size = 24
+
+def create_sequences(data, window_size):
+  x = []
+  y = []
+
+  for i in range(window_size, len(data)):
+    x.append(data[i-window_size:i])
+    y.append(data[i,0])
+
+  return np.array(x), np.array(y)
+
+x_train, y_train = create_sequences(train_scaled, window_size)
+x_test, y_test = create_sequences(test_scaled, window_size)
+
+print("x_train shape:", x_train.shape)
+print("y_train shape:", y_train.shape)
+print("x_test shape:", x_test.shape)
+print("y_test shape:", y_test.shape)
+
+---
+
+#build transformer model
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Input, Dense, Dropout
+from tensorflow.keras.layers import LayerNormalization
+from tensorflow.keras.layers import MultiHeadAttention
+from tensorflow.keras.layers import GlobalAveragePooling1D
+
+input_shape = (x_train.shape[1], x_train.shape[2])
+
+inputs = tf.keras.Input(shape=input_shape)
+
+#convert the input features into a larger representation
+x = Dense(32)(inputs)
+
+#transformer attention layer
+attention = MultiHeadAttention(
+    num_heads=2,
+    key_dim=16
+)(x, x)
+
+x = LayerNormalization()(x + attention)
+
+#feed-forward layer
+feed_forward = Dense(32, activation='relu')(x)
+x = LayerNormalization()(x + feed_forward)
+
+#convert the sequence into one value
+x = GlobalAveragePooling1D()(x)
+
+x = Dropout(0.1)(x)
+
+#output predicted Global_active_power
+outputs = Dense(1)(x)
+
+model = tf.keras.Model(inputs=inputs, outputs=outputs)
+
+#configures model for training
+model.compile(
+    optimizer='adam',
+    loss='mse',
+    metrics=['mae']
+)
+
+model.summary()
+
+---
+
+history = model.fit(
+  x_train,
+  y_train,
+  epochs=20,
+  batch_size=32,
+  validation_split=0.1,
+  verbose=1
+)
+
+---
+
+#make predictions on the test data/using the trained Transformer on the test data that it DIDN'T train on
+predictions = model.predict(x_test) #this line is the actual prediction step + USE this for evaluation
+
+print("Prediction shape:", predictions.shape)
+
+---
+
+
+#prepare actual values and Transformer predictions
+
+#get the actual Global Active Power values (from dataset 1)
+actual = test_data['Global_active_power'].iloc[window_size:].values
+
+predicted_scaled = predictions.flatten()
+
+#convert predictions back to the original scale
+predicted = (
+    predicted_scaled
+    * (scaler.data_max_[0] - scaler.data_min_[0])
+    + scaler.data_min_[0]
+)
+
+#get the dates from Dataset 1
+test_dates = df1['datetime'].iloc[window_size:].reset_index(drop=True)
+
+#create a results table
+transformer_results = pd.DataFrame({
+    'datetime': test_dates,
+    'Global_active_power': actual,
+    'prediction': predicted
+})
+
+print("Results shape:", transformer_results.shape)
+
+transformer_results.head()
+
+---
+
+
+#graph actual vs transformer predictions
+
+ax = transformer_results.set_index('datetime')[
+    ['Global_active_power', 'prediction']
+].plot(figsize=(15, 5))
+
+ax.set_title('Actual vs Transformer Predictions')
+ax.set_xlabel('Time')
+ax.set_ylabel('Global Active Power')
+
+plt.legend(['Actual Global Active Power', 'Transformer Prediction'])
+
+plt.tight_layout()
+plt.show()
+
+---
+
+#graph zoomed in actual vs Transformer predictions
+
+zoomed = transformer_results[
+    (transformer_results['datetime'] >= '2017-05-20') &
+    (transformer_results['datetime'] <= '2017-05-26')
+]
+
+ax = zoomed.set_index('datetime')[
+    ['Global_active_power', 'prediction']
+].plot(figsize=(15, 5))
+
+ax.set_title('Transformer Predictions vs Actual')
+ax.set_xlabel('Time')
+ax.set_ylabel('Global Active Power')
+
+plt.legend(['Actual Global Active Power', 'Transformer Prediction'])
+
+plt.tight_layout()
+plt.show()
+
+---
+
+#get the latest 24 hours of data
+last_24hrs = test_data.iloc[-24:].values
+
+print("Input shape for future prediction:", last_24hrs.shape)
+
+---
+
+#Predict the next 24 hours
+
+future_predictions = []
+
+current_sequence = last_24hrs.copy()
+
+for i in range(24):
+
+    #scale the current 24-hour sequence
+    current_scaled = scaler.transform(
+        pd.DataFrame(current_sequence, columns=features)
+    )
+
+    #reshape for the Transformer
+    current_scaled = current_scaled.reshape(1, 24, 7)
+
+    #predict the next hour
+    next_prediction_scaled = model.predict(
+        current_scaled,
+        verbose=0
+    )[0, 0]
+
+    #convert prediction back to original units
+    next_prediction = (
+        next_prediction_scaled
+        * (scaler.data_max_[0] - scaler.data_min_[0])
+        + scaler.data_min_[0]
+    )
+
+    future_predictions.append(next_prediction)
+
+    #create the next row
+    next_row = current_sequence[-1].copy()
+    next_row[0] = next_prediction
+
+    #move the window forward
+    current_sequence = np.vstack([
+        current_sequence[1:],
+        next_row
+    ])
+
+print("Number of future predictions:", len(future_predictions))
+
+---
+
+#CREATE dates for the next 24 hours
+
+last_datetime = df1['datetime'].iloc[-1]
+
+future_dates = pd.date_range(
+    start=last_datetime + pd.Timedelta(hours=1),
+    periods=24,
+    freq='h'
+)
+
+print(future_dates)
+
+---
+
+#table of the future predictions
+
+future_forecast = pd.DataFrame({
+    'datetime': future_dates,
+    'predicted_Global_active_power': future_predictions
+})
+
+future_forecast.round(2)
+
+---
+
+#GRAPH: Actual energy consumption and future forecast
+
+#get the last 24 hours of actual data from Dataset 1
+actual_recent = df1.tail(24)
+
+plt.figure(figsize=(12, 5))
+
+#plot actual energy consumption
+plt.plot(
+    actual_recent['datetime'],
+    actual_recent['Global_active_power'],
+    marker='o',
+    label='Actual Global Active Power'
+)
+
+#plot the next 24 hours of predicted energy consumption
+plt.plot(
+    future_forecast['datetime'],
+    future_forecast['predicted_Global_active_power'],
+    marker='o',
+    label='Predicted Global Active Power'
+)
+
+plt.xlabel('Time')
+plt.ylabel('Global Active Power')
+plt.title('Transformer: Actual and Future Energy Forecast')
+plt.xticks(rotation=45)
+plt.legend()
+plt.tight_layout()
+plt.show()
